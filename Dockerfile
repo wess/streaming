@@ -6,7 +6,56 @@ ARG FFMPEG_VERSION=5.1
 ARG SOURCE_DIR=/usr/local/src
 ARG MAKEFLAGS="-j4"
 
+FROM composer:2.0 as composer
+ARG APP_DIR=/app
+
+ENV TESTING=false
+
+WORKDIR ${APP_DIR}
+
+COPY app/composer.json ${APP_DIR}
+COPY app/composer.lock ${APP_DIR}
+
+RUN composer install \
+      --ignore-platform-reqs \
+      --optimize-autoloader \
+      --no-plugins \
+      --no-scripts \
+      --prefer-dist
+
+FROM php:8.0-cli-alpine as php
+
+ENV PHP_SWOOLE_VERSION=v4.8.0
+    
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+
+RUN apk update \
+      && apk add --no-cache \
+        make \
+        automake \
+        autoconf \
+        gcc \
+        g++ \
+        git \
+        brotli-dev \
+      && docker-php-ext-install opcache \
+      && rm -rf /var/cache/apk/*
+
+WORKDIR /usr/local/src
+
+FROM php AS swoole
+
+RUN git clone \
+      --depth 1 \
+      --branch $PHP_SWOOLE_VERSION https://github.com/swoole/swoole-src.git \
+    && cd swoole-src \
+    && phpize \
+    && ./configure --enable-http2 \
+    && make \
+    && make install
+
 FROM alpine:${ALPINE_VERSION} as nginx
+
 ARG NGINX_VERSION
 ARG NGINX_RTMP_MODULE_VERSION
 ARG SOURCE_DIR
@@ -148,8 +197,10 @@ RUN ./configure \
   && make distclean \
   && rm -rf /var/cache/* /tmp/*
 
-FROM alpine:${ALPINE_VERSION}
+FROM alpine:${ALPINE_VERSION} as final
 LABEL MAINTAINER Wess Cope <wess@appwrite.io>
+
+ARG PHP_INI_DIR=/usr/local/etc/php
 
 # Set default ports.
 ENV HTTP_PORT 80
@@ -178,16 +229,28 @@ COPY --from=nginx /usr/local/nginx /usr/local/nginx
 COPY --from=nginx /etc/nginx /etc/nginx
 COPY --from=ffmpeg /usr/local /usr/local
 COPY --from=ffmpeg /usr/lib/libfdk-aac.so.2 /usr/lib/libfdk-aac.so.2
+COPY --from=composer /app/vendor /app/vendor
+COPY --from=swoole /usr/local/lib/php/extensions/no-debug-non-zts-20200930/swoole.so /usr/local/lib/php/extensions/no-debug-non-zts-20210902/
+
+RUN touch /usr/local/etc/php/conf.d/swoole.ini \
+    && echo extension=/usr/local/lib/php/extensions/no-debug-non-zts-20210902/swoole.so >> /usr/local/etc/php/conf.d/swoole.ini
+# RUN cp "$PHP_INI_DIR/php.ini-production" "$PHP_INI_DIR/php.ini"
+# RUN echo "opcache.enable_cli=1" >> $PHP_INI_DIR/php.ini
+# RUN echo "memory_limit=1024M" >> $PHP_INI_DIR/php.ini
 
 # Add NGINX path, config and static files.
 ENV PATH "${PATH}:/usr/local/nginx/sbin"
+
 COPY nginx.conf /etc/nginx/nginx.conf.template
+
 RUN mkdir -p /opt/data && mkdir /www
+
 COPY static /www/static
+COPY app /app
 
 EXPOSE 1935
 EXPOSE 80
 
 CMD envsubst "$(env | sed -e 's/=.*//' -e 's/^/\$/g')" < \
-  /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf \
-  && nginx
+      /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf \
+    && nginx 

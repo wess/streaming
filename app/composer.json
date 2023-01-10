@@ -1,0 +1,10 @@
+{
+    "name": "wess/streaming",
+    "type": "project",
+    "autoload": {
+        "psr-4": {
+            "Wess\\Streaming\\": "src/"
+        }
+    },
+    "require": {}
+}
