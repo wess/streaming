@@ -27,7 +27,13 @@ build: ## Build the Docker environment
 run: build ## Run live environment
 	@echo \
 	&& echo "Connecting to environment" \
-	&& docker run -it --privileged=true --network=host --rm --volume ${SRC_VOLUME}:/app  app:${VERSION}
+	&& docker run -it --privileged=true -p 3000:3000 -p 1935:1935 -p 8000:8000 --rm --volume ${SRC_VOLUME}:/app  ${PROJECT}:${VERSION}
+
+clean: ## Clean the environment
+	@echo \
+	&& echo "Cleaning environment..." \
+	&& docker rmi ${PROJECT}:${VERSION}
+
 
 release:  ## Build the project in release mode
 	@echo "Release"

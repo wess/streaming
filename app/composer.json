@@ -6,5 +6,7 @@
             "Wess\\Streaming\\": "src/"
         }
     },
-    "require": {}
+    "require": {
+        "ext-swoole": "^5.0"
+    }
 }

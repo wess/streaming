@@ -6,7 +6,7 @@ ARG FFMPEG_VERSION=5.1
 ARG SOURCE_DIR=/usr/local/src
 ARG MAKEFLAGS="-j4"
 
-FROM composer:2.0 as composer
+FROM phpswoole/swoole:php8.1-alpine as swoole
 ARG APP_DIR=/app
 
 ENV TESTING=false
@@ -22,37 +22,6 @@ RUN composer install \
       --no-plugins \
       --no-scripts \
       --prefer-dist
-
-FROM php:8.0-cli-alpine as php
-
-ENV PHP_SWOOLE_VERSION=v4.8.0
-    
-RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
-
-RUN apk update \
-      && apk add --no-cache \
-        make \
-        automake \
-        autoconf \
-        gcc \
-        g++ \
-        git \
-        brotli-dev \
-      && docker-php-ext-install opcache \
-      && rm -rf /var/cache/apk/*
-
-WORKDIR /usr/local/src
-
-FROM php AS swoole
-
-RUN git clone \
-      --depth 1 \
-      --branch $PHP_SWOOLE_VERSION https://github.com/swoole/swoole-src.git \
-    && cd swoole-src \
-    && phpize \
-    && ./configure --enable-http2 \
-    && make \
-    && make install
 
 FROM alpine:${ALPINE_VERSION} as nginx
 
@@ -200,10 +169,10 @@ RUN ./configure \
 FROM alpine:${ALPINE_VERSION} as final
 LABEL MAINTAINER Wess Cope <wess@appwrite.io>
 
-ARG PHP_INI_DIR=/usr/local/etc/php
+ARG PHP_INI_DIR=/etc/php81
 
 # Set default ports.
-ENV HTTP_PORT 80
+ENV HTTP_PORT 8000
 ENV HTTPS_PORT 443
 ENV RTMP_PORT 1935
 
@@ -223,20 +192,33 @@ RUN apk add --no-cache \
   opus \
   rtmpdump \
   x264-dev \
-  x265-dev
+  x265-dev \
+  php81 \
+  php81-ctype \
+  php81-curl \
+  php81-dom \
+  php81-fpm \
+  php81-gd \
+  php81-intl \
+  php81-mbstring \
+  php81-mysqli \
+  php81-opcache \
+  php81-openssl \
+  php81-phar \
+  php81-session \
+  php81-xml \
+  php81-xmlreader \
+  php81-pecl-swoole \
+  php81-pecl-swoole-dev \
+  composer
 
 COPY --from=nginx /usr/local/nginx /usr/local/nginx
 COPY --from=nginx /etc/nginx /etc/nginx
 COPY --from=ffmpeg /usr/local /usr/local
 COPY --from=ffmpeg /usr/lib/libfdk-aac.so.2 /usr/lib/libfdk-aac.so.2
-COPY --from=composer /app/vendor /app/vendor
-COPY --from=swoole /usr/local/lib/php/extensions/no-debug-non-zts-20200930/swoole.so /usr/local/lib/php/extensions/no-debug-non-zts-20210902/
 
-RUN touch /usr/local/etc/php/conf.d/swoole.ini \
-    && echo extension=/usr/local/lib/php/extensions/no-debug-non-zts-20210902/swoole.so >> /usr/local/etc/php/conf.d/swoole.ini
-# RUN cp "$PHP_INI_DIR/php.ini-production" "$PHP_INI_DIR/php.ini"
-# RUN echo "opcache.enable_cli=1" >> $PHP_INI_DIR/php.ini
-# RUN echo "memory_limit=1024M" >> $PHP_INI_DIR/php.ini
+RUN echo "opcache.enable_cli=1" >> $PHP_INI_DIR/php.ini
+RUN echo "memory_limit=1024M" >> $PHP_INI_DIR/php.ini
 
 # Add NGINX path, config and static files.
 ENV PATH "${PATH}:/usr/local/nginx/sbin"
@@ -249,8 +231,12 @@ COPY static /www/static
 COPY app /app
 
 EXPOSE 1935
-EXPOSE 80
+EXPOSE 8000
+EXPOSE 3000
 
-CMD envsubst "$(env | sed -e 's/=.*//' -e 's/^/\$/g')" < \
-      /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf \
-    && nginx 
+RUN envsubst "$(env | sed -e 's/=.*//' -e 's/^/\$/g')" < \
+      /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf
+
+ENV TERM xterm-256color
+
+CMD ["/bin/sh"]
